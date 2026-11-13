@@ -113,6 +113,16 @@ class CacheManagement:
         return self.identifier_prefix + identifier
 
     @property
+    def conn(self):
+        # Every thread must use its own connection: the add-on serves each IPC request in a new thread, and a
+        # connection shared between threads fails with "bad parameter or other API misuse" (sqlite3.InterfaceError)
+        return getattr(self.local_storage, 'conn', None)
+
+    @conn.setter
+    def conn(self, val):
+        self.local_storage.conn = val
+
+    @property
     def is_connected(self):
         return getattr(self.local_storage, 'is_connected', False)
 
