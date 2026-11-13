@@ -8,10 +8,11 @@
     See LICENSES/MIT.md for more information.
 """
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 
 import resources.lib.common as common
 from resources.lib.utils.data_types import merge_data_type, CustomVideoList
-from resources.lib.common.cache_utils import CACHE_COMMON
+from resources.lib.common.cache_utils import CACHE_COMMON, CACHE_METADATA
 from resources.lib.common.exceptions import CacheMiss, InvalidPathError, InvalidVideoListTypeError
 from resources.lib.common import VideoId
 from resources.lib.globals import G
@@ -21,13 +22,24 @@ from resources.lib.services.nfsession.directorybuilder.dir_builder_items \
             build_loco_listing, build_mainmenu_listing, build_profiles_listing, build_lolomo_category_listing,
             build_home_rows_listing)
 from resources.lib.services.nfsession.directorybuilder.dir_path_requests import (DirectoryPathRequests,
+                                                                                 METADATA_REFERENCE_KEYS,
                                                                                  _has_reference_entries,
+                                                                                 _metadata_names,
+                                                                                 _metadata_trailer_id,
+                                                                                 _metadata_trailer_url,
                                                                                  _metadata_has_cast_names,
                                                                                  _metadata_image_url,
                                                                                  _metadata_year,
                                                                                  metadata_with_title_page_fallback,
                                                                                  normalize_metadata_references)
 from resources.lib.utils.logging import LOG, measure_exec_time_decorator
+
+
+# Cache id prefix of the slim per-title metadata used to enrich the video lists
+LIST_METADATA_CACHE_PREFIX = 'list_meta_v1_'
+# Max time (seconds) a listing waits for the metadata requests, the IPC call of the add-on times out after 60s.
+# The titles not done in time are shown without the extra info and completed (from the cache) at next opening
+LIST_METADATA_TIME_BUDGET_SECS = 20
 
 
 class DirectoryBuilder(DirectoryPathRequests):
@@ -228,11 +240,29 @@ class DirectoryBuilder(DirectoryPathRequests):
         if not pending:
             return video_list
 
+        # The per-title enrichment is applied to a copy of the (cached) video list, so without a cache of its own
+        # every opening of a folder repeated one HTTP request per title (and a title page request as fallback).
+        # Here the slim result of each title is cached (persistent), only the titles without it are requested.
+        to_fetch = []
+        for item in pending:
+            cached_metadata = self._get_cached_list_metadata(item, art_only)
+            if cached_metadata is None:
+                to_fetch.append(item)
+            else:
+                self._apply_list_metadata(video_list, item, cached_metadata)
+        if to_fetch:
+            self._fetch_list_metadata(video_list, to_fetch, art_only)
+            G.CACHE_MANAGEMENT.execute_pending_db_ops()
+        video_list.artitem = next(iter(video_list.videos.values()), None)
+        return video_list
+
+    def _fetch_list_metadata(self, video_list, to_fetch, art_only):
+        """Request the metadata of the titles missing in the cache, apply and cache them"""
         cast_metadata_by_video = self.req_title_cast_metadata_batch(
-            item[0].value for item in pending if item[3])
+            item[0].value for item in to_fetch if item[3])
 
         metadata_request = None
-        if any(item[2] or item[4] or item[5] for item in pending):
+        if any(item[2] or item[4] or item[5] for item in to_fetch):
             try:
                 metadata_request = self._prepare_metadata_request()
             except Exception as exc:  # pylint: disable=broad-except
@@ -255,30 +285,101 @@ class DirectoryBuilder(DirectoryPathRequests):
                      (needs_year and not _metadata_year(metadata)) or
                      (needs_synopsis and not self._metadata_synopsis(metadata)))):
                 metadata = metadata_with_title_page_fallback(videoid.value, metadata)
-            return item, metadata
+            slim_metadata = self._slim_list_metadata(metadata)
+            # The worker caches its own result, so the work is not lost if the listing stops waiting for it
+            self._add_cached_list_metadata(item, art_only, slim_metadata)
+            return item, slim_metadata
 
-        max_workers = min(12 if art_only else 6, len(pending))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(_load_metadata, item) for item in pending]
-            for future in as_completed(futures):
+        executor = ThreadPoolExecutor(max_workers=min(12 if art_only else 6, len(to_fetch)))
+        futures = [executor.submit(_load_metadata, item) for item in to_fetch]
+        try:
+            for future in as_completed(futures, timeout=LIST_METADATA_TIME_BUDGET_SECS):
                 try:
-                    item, metadata = future.result()
+                    item, slim_metadata = future.result()
                 except Exception as exc:  # pylint: disable=broad-except
                     LOG.debug('Metadata enrichment worker failed ({})', type(exc).__name__)
                     continue
-                videoid, video, needs_art, needs_refs, needs_year, needs_synopsis = item
-                if needs_art:
-                    self._apply_metadata_art(video, metadata)
-                if needs_synopsis:
-                    self._apply_metadata_synopsis(video, metadata)
-                if needs_year:
-                    release_year = _metadata_year(metadata)
-                    if release_year:
-                        video['releaseYear'] = {'value': release_year}
-                if needs_refs:
-                    normalize_metadata_references(video_list.data, videoid.value, metadata, video)
-        video_list.artitem = next(iter(video_list.videos.values()), None)
-        return video_list
+                self._apply_list_metadata(video_list, item, slim_metadata)
+        except FuturesTimeoutError:
+            LOG.warn('Metadata enrichment stopped after {}s, {} of {} titles left for the next opening',
+                     LIST_METADATA_TIME_BUDGET_SECS, sum(1 for future in futures if not future.done()), len(futures))
+        finally:
+            # Do not wait for the pending requests: the ones already started finish in background (and get cached)
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    @staticmethod
+    def _list_metadata_cache_id(item, art_only):
+        videoid, _video, needs_art, needs_refs, needs_year, needs_synopsis = item
+        flags = ''.join('1' if flag else '0' for flag in (needs_art, needs_refs, needs_year, needs_synopsis, art_only))
+        return f'{LIST_METADATA_CACHE_PREFIX}{videoid.value}_{flags}'
+
+    def _get_cached_list_metadata(self, item, art_only):
+        try:
+            return G.CACHE.get(CACHE_METADATA, self._list_metadata_cache_id(item, art_only))
+        except CacheMiss:
+            return None
+        except Exception as exc:  # pylint: disable=broad-except
+            LOG.debug('List metadata cache read failed ({})', type(exc).__name__)
+            return None
+
+    def _add_cached_list_metadata(self, item, art_only, slim_metadata):
+        _videoid, _video, needs_art, needs_refs, needs_year, needs_synopsis = item
+        is_complete = ((not needs_art or bool(slim_metadata.get('boxart') or slim_metadata.get('artwork'))) and
+                       (not needs_refs or bool(slim_metadata.get('cast'))) and
+                       (not needs_year or bool(slim_metadata.get('year'))) and
+                       (not needs_synopsis or bool(slim_metadata.get('synopsis'))))
+        try:
+            G.CACHE.add(CACHE_METADATA, self._list_metadata_cache_id(item, art_only), slim_metadata,
+                        # An incomplete result (request failed or data not available yet) is retried after a while
+                        ttl=None if is_complete else max(1, G.ADDON.getSettingInt('cache_ttl')) * 60,
+                        delayed_db_op=True)
+        except Exception as exc:  # pylint: disable=broad-except
+            LOG.debug('List metadata cache write failed ({})', type(exc).__name__)
+
+    @staticmethod
+    def _slim_list_metadata(metadata):
+        """Keep only the metadata fields used by the list enrichment (keeps the cache small and fast to load)"""
+        slim = {}
+        if not isinstance(metadata, dict):
+            return slim
+        boxart = DirectoryBuilder._best_metadata_art(metadata, ('boxart', 'boxArt', 'boxarts'), portrait=True)
+        if boxart:
+            slim['boxart'] = boxart
+        wide_art = DirectoryBuilder._best_metadata_art(
+            metadata, ('artwork', 'interestingMoment', 'storyart', 'storyArt'), portrait=False)
+        if wide_art:
+            slim['artwork'] = wide_art
+        synopsis = DirectoryBuilder._metadata_synopsis(metadata)
+        if synopsis and isinstance(synopsis, str):
+            slim['synopsis'] = synopsis
+        release_year = _metadata_year(metadata)
+        if release_year:
+            slim['year'] = release_year
+        for _source, (_target, keys) in METADATA_REFERENCE_KEYS.items():
+            names = _metadata_names(metadata, keys)
+            if names:
+                slim[keys[0]] = names
+        trailer_id = _metadata_trailer_id(metadata)
+        if trailer_id:
+            slim['merchedVideoId'] = trailer_id
+        else:
+            trailer_url = _metadata_trailer_url(metadata)
+            if trailer_url:
+                slim['trailerUrl'] = trailer_url
+        return slim
+
+    def _apply_list_metadata(self, video_list, item, metadata):
+        videoid, video, needs_art, needs_refs, needs_year, needs_synopsis = item
+        if needs_art:
+            self._apply_metadata_art(video, metadata)
+        if needs_synopsis:
+            self._apply_metadata_synopsis(video, metadata)
+        if needs_year:
+            release_year = _metadata_year(metadata)
+            if release_year:
+                video['releaseYear'] = {'value': release_year}
+        if needs_refs:
+            normalize_metadata_references(video_list.data, videoid.value, metadata, video)
 
     @staticmethod
     def _needs_metadata_boxart(video):
