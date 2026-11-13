@@ -7,6 +7,7 @@
     SPDX-License-Identifier: MIT
     See LICENSES/MIT.md for more information.
 """
+from contextlib import nullcontext
 from copy import deepcopy
 
 import xbmcgui
@@ -93,11 +94,11 @@ def search_add():
         if search_term and search_term.strip():
             row_id = G.LOCAL_DB.insert_search_item(SEARCH_TYPES[type_index], search_term.strip())
     elif search_type == 'audio_lang':
-        row_id = _search_add_bylang(SEARCH_TYPES[type_index], api.get_available_audio_languages())
+        row_id = _search_add_bylang(SEARCH_TYPES[type_index], _with_busy_dialog(api.get_available_audio_languages))
     elif search_type == 'subtitles_lang':
-        row_id = _search_add_bylang(SEARCH_TYPES[type_index], api.get_available_subtitles_languages())
+        row_id = _search_add_bylang(SEARCH_TYPES[type_index], _with_busy_dialog(api.get_available_subtitles_languages))
     elif search_type == 'dubbed_lang':
-        row_id = _search_add_bylang(SEARCH_TYPES[type_index], api.get_available_dubbed_languages())
+        row_id = _search_add_bylang(SEARCH_TYPES[type_index], _with_busy_dialog(api.get_available_dubbed_languages))
     elif search_type == 'genre_id':
         genre_id = ui.show_dlg_input_numeric(search_types_desc[type_index], mask_input=False)
         if genre_id:
@@ -109,6 +110,11 @@ def search_add():
     if row_id is not None:
         return search_query(str(row_id), 0, True)
     return False
+
+
+def _with_busy_dialog(func):
+    with common.show_busy_dialog():
+        return func()
 
 
 def _search_add_bylang(search_type, dict_languages):
@@ -187,6 +193,21 @@ def search_query(row_id, perpetual_range_start, dir_update_listing):
 def exec_query(row_id, search_type, search_params, search_value, perpetual_range_start, dir_update_listing,
                path_params=None):
     menu_data = deepcopy(G.MAIN_MENU_ITEMS['search'])
+    # Show the standard busy dialog while the search runs, otherwise the user gets no feedback at all
+    # (not for the query made from a JSON-RPC request / widgets, there the dialog would pop up over the screen)
+    with (nullcontext() if path_params else common.show_busy_dialog()):
+        dir_items, extra_data = _fetch_query_results(menu_data, row_id, search_type, search_params, search_value,
+                                                     perpetual_range_start, path_params)
+    # Show the results
+    if not dir_items:
+        ui.show_notification(common.get_local_string(30407))
+        return False
+    _search_results_directory(search_value, menu_data, dir_items, extra_data, dir_update_listing)
+    return True
+
+
+def _fetch_query_results(menu_data, row_id, search_type, search_params, search_value, perpetual_range_start,
+                         path_params):
     if search_type == 'text':
         call_args = {
             'menu_data': menu_data,
@@ -225,12 +246,7 @@ def exec_query(row_id, search_type, search_params, search_value, perpetual_range
         dir_items, extra_data = common.make_call('get_video_list_sorted_sp', call_args)
     else:
         raise NotImplementedError(f'Search type {search_type} not implemented')
-    # Show the results
-    if not dir_items:
-        ui.show_notification(common.get_local_string(30407))
-        return False
-    _search_results_directory(search_value, menu_data, dir_items, extra_data, dir_update_listing)
-    return True
+    return dir_items, extra_data
 
 
 @custom_viewmode(G.VIEW_SHOW)
