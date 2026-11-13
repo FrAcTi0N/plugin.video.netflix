@@ -13,6 +13,7 @@ import xbmc
 import xbmcgui
 
 from resources.lib.globals import G
+from resources.lib.utils.logging import LOG
 
 # Convert the deprecated ListItem.setInfo keys to use method names of the new xbmc.InfoTagVideo object
 INFO_CONVERT_KEY = {
@@ -117,10 +118,18 @@ class ListItemW(xbmcgui.ListItem):
         return super().getArt(key)
 
     def setArt(self, dictionary: Dict[str, str]):
+        # Kodi accepts only strings (key and value): a single None/other type value makes the whole unpickle of the
+        # ListItem fail with "TypeError: in method 'ListItem_setArt'", so the folder can not be shown at all
+        clean_art = {}
+        for key, value in dictionary.items():
+            if isinstance(key, str) and isinstance(value, str):
+                clean_art[key] = value
+            else:
+                LOG.warn('ListItem art "{}" skipped, invalid value type: {}', key, type(value).__name__)
         if G.IS_SERVICE:
-            self.__dict__['art'].update(dictionary)
+            self.__dict__['art'].update(clean_art)
         else:
-            super().setArt(dictionary)
+            super().setArt(clean_art)
 
     def addStreamInfo(self, cType: str, dictionary: Dict[str, str]):
         if G.IS_SERVICE:
