@@ -76,13 +76,21 @@ def _play(videoid, is_played_from_strm=False):
         xbmcplugin.setResolvedUrl(handle=G.PLUGIN_HANDLE, succeeded=False, listitem=list_item)
         return
 
+    # With a TMDb API key the IMDb id is added to the played item, for add-ons that need it (like parental guides)
+    is_imdb_id_wanted = bool((G.ADDON.getSetting('tmdb_api_key') or '').strip())
     # When a video is played from Kodi library or Up Next add-on is needed set infoLabels and art info to list_item
-    if is_played_from_strm or is_upnext_enabled or G.IS_ADDON_EXTERNAL_CALL:
+    if is_played_from_strm or is_upnext_enabled or G.IS_ADDON_EXTERNAL_CALL or is_imdb_id_wanted:
         info, arts = common.make_call('get_videoid_info', videoid)
+        imdb_id = _get_imdb_id(videoid, info) if is_imdb_id_wanted else ''
         if G.IS_OLD_KODI_MODULES:
             list_item.setInfo('video', info)
+            if imdb_id:
+                list_item.setInfo('video', {'imdbnumber': imdb_id})
         else:
             set_video_info_tag(info, list_item.getVideoInfoTag())
+            if imdb_id:
+                list_item.getVideoInfoTag().setUniqueIDs({'imdb': imdb_id}, 'imdb')
+                list_item.getVideoInfoTag().setIMDBNumber(imdb_id)
         list_item.setArt(arts)
 
     # Start and initialize the action controller (see action_controller.py)
@@ -93,6 +101,19 @@ def _play(videoid, is_played_from_strm=False):
         'is_played_from_strm': is_played_from_strm,
         'resume_position': resume_position})
     xbmcplugin.setResolvedUrl(handle=G.PLUGIN_HANDLE, succeeded=True, listitem=list_item)
+
+
+def _get_imdb_id(videoid, info):
+    """The IMDb id of the movie, or of the tv show for an episode; empty when not available (never fails)"""
+    try:
+        is_show = videoid.mediatype == common.VideoId.EPISODE
+        title = info.get('TVShowTitle') if is_show else info.get('Title')
+        # The year of an episode is not the one of the tv show
+        year = '' if is_show else info.get('Year', '')
+        return common.make_call('get_imdb_id', {'videoid': videoid, 'title': title or '', 'year': str(year or '')}) or ''
+    except Exception as exc:  # pylint: disable=broad-except
+        LOG.warn('IMDb id not available: {}', exc)
+        return ''
 
 
 def get_inputstream_listitem(videoid):

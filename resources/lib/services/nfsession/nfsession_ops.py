@@ -90,6 +90,7 @@ class NFSessionOperations(SessionPathRequests):
             self.set_profile_lock,
             self.get_metadata,
             self.get_videoid_info,
+            self.get_imdb_id,
             self.get_direct_trailer
         ]
         # Share the activate profile function to SessionBase class
@@ -495,6 +496,20 @@ class NFSessionOperations(SessionPathRequests):
             infos = get_info(videoid, raw_data['videos'][videoid.value], raw_data, profile_language_code)[0]
         art = get_art(videoid, raw_data['videos'][videoid.value], profile_language_code)
         return infos, art
+
+    def get_imdb_id(self, videoid, title, year=''):
+        """
+        Get the IMDb id of a movie or of the tv show of an episode (from TMDb, needs the TMDb API key of the settings),
+        an empty string when not available. Any failure is not raised, it is not needed to play the video.
+        """
+        from resources.lib.utils.tmdb_art import get_imdb_id
+        try:
+            is_show = videoid.mediatype in (common.VideoId.EPISODE, common.VideoId.SEASON, common.VideoId.SHOW)
+            return get_imdb_id(is_show, videoid.tvshowid if is_show else videoid.value, title, year or '',
+                               G.LOCAL_DB.get_profile_config('language', ''))
+        except Exception as exc:  # pylint: disable=broad-except
+            LOG.warn('IMDb id not available: {}', exc)
+            return ''
 
     def _get_videoid_info_metadata(self, videoid):
         metadata_data = self.get_safe(

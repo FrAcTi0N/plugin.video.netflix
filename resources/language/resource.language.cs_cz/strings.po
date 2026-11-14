@@ -1261,9 +1261,9 @@ msgid "TMDb"
 msgstr "TMDb"
 
 msgctxt "#30762"
-msgid "TMDb API key (season posters)"
-msgstr "TMDb API klíč (postery sezón)"
+msgid "TMDb API key (season posters, IMDb id)"
+msgstr "TMDb API klíč (postery sezón, IMDb ID)"
 
 msgctxt "#30763"
-msgid "Netflix neposkytuje obrázky sezón. S bezplatným TMDb API klíčem (API Key nebo API Read Access Token z themoviedb.org/settings/api) se postery sezón berou z TMDb. Nechte prázdné, pokud TMDb nechcete používat. Změna se u již načtených sezón projeví po vymazání cache."
-msgstr "Netflix neposkytuje obrázky sezón. S bezplatným TMDb API klíčem (API Key nebo API Read Access Token z themoviedb.org/settings/api) se postery sezón berou z TMDb. Nechte prázdné, pokud TMDb nechcete používat. Změna se u již načtených sezón projeví po vymazání cache."
+msgid "Netflix provides no images for the seasons and no IMDb id of the titles. With a free TMDb API key (API Key or API Read Access Token from themoviedb.org/settings/api) the season posters and the IMDb id of the played video (used by add-ons like parental guides) are taken from TMDb. Leave empty to not use TMDb. Purge the cache to apply the change to the seasons already loaded."
+msgstr "Netflix neposkytuje obrázky sezón ani IMDb ID titulů. S bezplatným TMDb API klíčem (API Key nebo API Read Access Token z themoviedb.org/settings/api) se postery sezón a IMDb ID přehrávaného videa (pro doplňky jako rodičovský dohled) berou z TMDb. Nechte prázdné, pokud TMDb nechcete používat. Změna se u již načtených sezón projeví po vymazání cache."
