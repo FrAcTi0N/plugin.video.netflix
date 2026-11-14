@@ -228,7 +228,9 @@ def get_art(videoid, item, profile_language_code='', delayed_db_op=False):
     try:
         art = G.CACHE.get(CACHE_ARTINFO, cache_identifier)
         parsed_art = parse_art(videoid, item)
-        if _refresh_cached_art(art, parsed_art, item):
+        updated = _refresh_cached_art(art, parsed_art, item)
+        updated = _replace_season_art(videoid, art, parsed_art) or updated
+        if updated:
             G.CACHE.add(CACHE_ARTINFO, cache_identifier, art,
                         delayed_db_op=delayed_db_op)
     except CacheMiss:
@@ -236,6 +238,18 @@ def get_art(videoid, item, profile_language_code='', delayed_db_op=False):
         G.CACHE.add(CACHE_ARTINFO, cache_identifier, art,
                     delayed_db_op=delayed_db_op)
     return art
+
+
+def _replace_season_art(videoid, art, parsed_art):
+    """A season poster (from TMDb) replaces the one in cache, that can be a previous one or the one of the show"""
+    if videoid.mediatype != common.VideoId.SEASON or not parsed_art.get('poster'):
+        return False
+    updated = False
+    for key in ('poster', 'thumb', 'landscape'):
+        if parsed_art.get(key) and art.get(key) != parsed_art[key]:
+            art[key] = parsed_art[key]
+            updated = True
+    return updated
 
 
 def _refresh_cached_art(art, parsed_art, item):

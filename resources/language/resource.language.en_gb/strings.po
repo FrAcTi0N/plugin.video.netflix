@@ -1335,3 +1335,15 @@ msgstr ""
 msgctxt "#30760"
 msgid "The profile lock has been removed"
 msgstr ""
+
+msgctxt "#30761"
+msgid "TMDb"
+msgstr ""
+
+msgctxt "#30762"
+msgid "TMDb API key (season posters)"
+msgstr ""
+
+msgctxt "#30763"
+msgid "Netflix provides no images for the seasons. With a free TMDb API key (API Key or API Read Access Token from themoviedb.org/settings/api) the season posters are taken from TMDb. Leave empty to not use TMDb. Purge the cache to apply the change to the seasons already loaded."
+msgstr ""

@@ -1306,6 +1306,19 @@
                     </control>
                 </setting>
             </group>
+            <!--GROUP: TMDb-->
+            <group id="6" label="30761">
+                <setting id="tmdb_api_key" type="string" label="30762" help="30763">
+                    <level>0</level>
+                    <default></default>
+                    <constraints>
+                        <allowempty>true</allowempty>
+                    </constraints>
+                    <control type="edit" format="string">
+                        <heading>30762</heading>
+                    </control>
+                </setting>
+            </group>
         </category>
     </section>
 </settings>

@@ -165,8 +165,9 @@ def _create_season_item(tvshowid, seasonid_value, season, season_list, common_da
     seasonid = tvshowid.derive_season(seasonid_value)
     list_item = ListItemW(label=season['summary']['value']['name'])
     list_item.setProperty('nf_videoid', seasonid.to_string())
+    # The season has its own art only when available (TMDb), otherwise it takes the art of the show
     add_info_list_item(list_item, seasonid, season, season_list.data, False, common_data,
-                       art_item=season_list.artitem)
+                       art_item=season if season.get('boxarts') else season_list.artitem)
     list_item.addContextMenuItems(generate_context_menu_items(seasonid, False, None))
     return common.build_url(videoid=seasonid, mode=G.MODE_DIRECTORY), list_item, True
 

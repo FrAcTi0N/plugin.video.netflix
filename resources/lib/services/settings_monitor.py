@@ -8,6 +8,7 @@
     See LICENSES/MIT.md for more information.
 """
 from contextlib import contextmanager
+import hashlib
 
 import xbmc
 
@@ -112,6 +113,12 @@ class SettingsMonitor(xbmc.Monitor):
         if page_results != page_results_old:
             G.LOCAL_DB.set_value('page_results', page_results, TABLE_SETTINGS_MONITOR)
             clean_buckets += [CACHE_COMMON, CACHE_MYLIST, CACHE_SEARCH]
+
+        # The cached lists of the seasons depend on the TMDb key (season posters)
+        tmdb_key_hash = hashlib.sha1(G.ADDON.getSetting('tmdb_api_key').strip().encode('utf-8')).hexdigest()
+        if tmdb_key_hash != G.LOCAL_DB.get_value('tmdb_api_key_hash', '', TABLE_SETTINGS_MONITOR):
+            G.LOCAL_DB.set_value('tmdb_api_key_hash', tmdb_key_hash, TABLE_SETTINGS_MONITOR)
+            clean_buckets.append(CACHE_COMMON)
 
         _check_watched_status_sync()
 

@@ -24,6 +24,7 @@ import requests.exceptions as req_exceptions
 
 from resources.lib import common
 from resources.lib.utils import website
+from resources.lib.utils.tmdb_art import get_season_posters
 from resources.lib.utils.data_types import (VideoListSorted, SubgenreList, SeasonList, EpisodeList, LoCo, VideoList,
                                             CustomVideoList, LoLoMoCategory, VideoListSupplemental,
                                             VideosList)
@@ -441,15 +442,19 @@ def _graphql_headers():
     return headers
 
 
-def _season_node_to_item(node, index):
+def _season_node_to_item(node, index, poster_url=None):
     season_id = str(node['videoId'])
     title = node.get('title') or f'Season {index + 1}'
     episodes = node.get('episodes', {}).get('totalCount')
-    return season_id, {
+    item = {
         'summary': _summary(season_id, title, 'season', index + 1, episodes),
         'title': _value(title),
         'availability': _value({'isPlayable': True})
     }
+    if poster_url:
+        # Same shape of the art from Netflix, read by 'parse_art'
+        item['boxarts'] = {ART_SIZE_POSTER: {'jpg': {'value': {'url': poster_url}}}}
+    return season_id, item
 
 
 def _episode_node_to_item(node, season_number, metadata=None):
@@ -1801,10 +1806,18 @@ class DirectoryPathRequests:
             GRAPHQL_OP_SEASONS)
         show_data = data['videos'][0]
         edges = show_data['seasons']['edges']
+        show_metadata = self._metadata_show(videoid)
+        show_title = show_metadata.get('title') or show_data.get('title') or str(videoid.tvshowid)
+        try:
+            posters = get_season_posters(videoid.tvshowid, show_title, show_metadata.get('year') or '',
+                                         G.LOCAL_DB.get_profile_config('language', ''), len(edges))
+        except Exception as exc:  # pylint: disable=broad-except
+            # The posters are optional, never break the list of the seasons because of them
+            LOG.warn('Season posters skipped: {}', exc)
+            posters = {}
         seasons = OrderedDict(
-            _season_node_to_item(edge.get('node') or edge, index)
+            _season_node_to_item(edge.get('node') or edge, index, posters.get(index + 1))
             for index, edge in enumerate(edges))
-        show_title = self._metadata_show_title(videoid) or show_data.get('title') or str(videoid.tvshowid)
         tvshow = {
             'title': _value(show_title),
             'delivery': _value({}),
@@ -1817,6 +1830,16 @@ class DirectoryPathRequests:
             artitem=tvshow,
             tvshow=tvshow,
             seasons=seasons)
+
+    def _metadata_show(self, videoid):
+        """Return the metadata (title, year, ...) of the show, an empty dict when not available"""
+        try:
+            metadata_data = self.nfsession.get_safe(
+                endpoint='metadata',
+                params={'movieid': videoid.tvshowid, '_': int(time.time() * 1000)})
+            return metadata_data['video'] or {}
+        except (MetadataNotAvailable, KeyError, TypeError, req_exceptions.RequestException):
+            return {}
 
     def _metadata_show_title(self, videoid):
         try:

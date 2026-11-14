@@ -1255,3 +1255,15 @@ msgstr ""
 msgctxt "#30749"
 msgid "Reset"
 msgstr ""
+
+msgctxt "#30761"
+msgid "TMDb"
+msgstr "TMDb"
+
+msgctxt "#30762"
+msgid "TMDb API key (season posters)"
+msgstr "TMDb API klíč (postery sezón)"
+
+msgctxt "#30763"
+msgid "Netflix neposkytuje obrázky sezón. S bezplatným TMDb API klíčem (API Key nebo API Read Access Token z themoviedb.org/settings/api) se postery sezón berou z TMDb. Nechte prázdné, pokud TMDb nechcete používat. Změna se u již načtených sezón projeví po vymazání cache."
+msgstr "Netflix neposkytuje obrázky sezón. S bezplatným TMDb API klíčem (API Key nebo API Read Access Token z themoviedb.org/settings/api) se postery sezón berou z TMDb. Nechte prázdné, pokud TMDb nechcete používat. Změna se u již načtených sezón projeví po vymazání cache."
